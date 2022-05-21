@@ -7,7 +7,7 @@ version = "1.0"
 
 [tool.poetry.dependencies]
 SQLAlchemy = "^1.4.0"
-python = "^3.6"
+python = "^3.7"
 
 [tool.poetry.dev-dependencies]
 SQLAlchemy = {version = "^1.4.0", extras = ["mypy"]}
