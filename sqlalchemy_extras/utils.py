@@ -21,6 +21,7 @@ def pluralize(word: str):
         case x:
             return f"{x}s"
 
+
 ASYNC_ENGINES = {
     "postgresql": "{engine}+asyncpg",
     "postgres": "postgresql+asyncpg",
