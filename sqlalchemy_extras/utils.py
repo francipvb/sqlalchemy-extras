@@ -1,3 +1,5 @@
+from typing import Optional, Union
+
 from sqlalchemy.engine import URL, make_url
 
 
@@ -13,13 +15,13 @@ def pluralize(word: str):
     'bananas'
     >>>
     """
-    match word.lower():
-        case x if x.endswith("y"):
-            return f"{x[:-1]}ies"
-        case x if x.endswith("s") | x.endswith("o") | x.endswith("u"):
-            return f"{x}es"
-        case x:
-            return f"{x}s"
+    x = word.lower()
+    if x.endswith("y"):
+        return f"{x[:-1]}ies"
+    elif x.endswith("s") | x.endswith("o") | x.endswith("u"):
+        return f"{x}es"
+    else:
+        return f"{x}s"
 
 
 ASYNC_ENGINES = {
@@ -29,7 +31,7 @@ ASYNC_ENGINES = {
 }
 
 
-def make_async_url(url: str | URL):
+def make_async_url(url: Optional[Union[str, URL]]):
     """Fix an URL to be async compatible assigning an engine and fixing the scheme.
 
     Args:
