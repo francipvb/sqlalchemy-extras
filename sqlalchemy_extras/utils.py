@@ -1,3 +1,5 @@
+from typing import Optional, Union
+
 from sqlalchemy.engine import URL, make_url
 
 
@@ -13,13 +15,13 @@ def pluralize(word: str):
     'bananas'
     >>>
     """
-    match word.lower():
-        case x if x.endswith("y"):
-            return f"{x[:-1]}ies"
-        case x if x.endswith("s") | x.endswith("o") | x.endswith("u"):
-            return f"{x}es"
-        case x:
-            return f"{x}s"
+    x = word.lower()
+    if x.endswith("y"):
+        return f"{x[:-1]}ies"
+    elif x.endswith("s") | x.endswith("o") | x.endswith("u"):
+        return f"{x}es"
+    else:
+        return f"{x}s"
 
 
 ASYNC_ENGINES = {
@@ -29,7 +31,7 @@ ASYNC_ENGINES = {
 }
 
 
-def make_async_url(url: str | URL):
+def make_async_url(url: Optional[Union[str, URL]]):
     """Fix an URL to be async compatible assigning an engine and fixing the scheme.
 
     Args:
@@ -50,6 +52,14 @@ def make_async_url(url: str | URL):
     postgresql+asyncpg://user:***@server:5432/db
     >>> make_async_url('postgresql+asyncpg://user:pass@server:5432/db')
     postgresql+asyncpg://user:***@server:5432/db
+    >>> make_async_url(None)
+    Traceback (most recent call last):
+      ...
+    ValueError: ...
+    >>> make_async_url('mongodb://testserver:37017/test')
+    Traceback (most recent call last):
+      ...
+    ValueError: ...
     >>>
     """
     if url is None:
@@ -63,6 +73,6 @@ def make_async_url(url: str | URL):
             )
         )
     except KeyError:
-        raise RuntimeError("Database not supported.")
+        raise ValueError("Database not supported.")
     else:
         return async_url
