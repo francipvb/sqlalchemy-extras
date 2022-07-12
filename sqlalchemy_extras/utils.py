@@ -50,6 +50,14 @@ def make_async_url(url: str | URL):
     postgresql+asyncpg://user:***@server:5432/db
     >>> make_async_url('postgresql+asyncpg://user:pass@server:5432/db')
     postgresql+asyncpg://user:***@server:5432/db
+    >>> make_async_url(None)
+    Traceback (most recent call last):
+      ...
+    ValueError: ...
+    >>> make_async_url('mongodb://testserver:37017/test')
+    Traceback (most recent call last):
+      ...
+    ValueError: ...
     >>>
     """
     if url is None:
@@ -63,6 +71,6 @@ def make_async_url(url: str | URL):
             )
         )
     except KeyError:
-        raise RuntimeError("Database not supported.")
+        raise ValueError("Database not supported.")
     else:
         return async_url
