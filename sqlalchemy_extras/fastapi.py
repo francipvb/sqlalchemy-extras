@@ -157,13 +157,12 @@ async def sqlalchemy_session(
     """
     session = factory()
 
-    async with session:
-        try:
+    try:
+        async with session.begin() as trans:
             yield session
-        except DatabaseError:
-            raise
-        else:
-            await session.commit()
+            await trans.commit()
+    finally:
+        await session.close()
 
 
 async def sqlalchemy_connection(
