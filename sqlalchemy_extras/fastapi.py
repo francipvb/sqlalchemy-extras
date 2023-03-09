@@ -157,9 +157,12 @@ async def sqlalchemy_session(
     """
     session = factory()
 
-    async with session.begin() as trans:
-        yield session
-        await trans.commit()
+    try:
+        async with session.begin() as trans:
+            yield session
+            await trans.commit()
+    finally:
+        await session.close()
 
 
 async def sqlalchemy_connection(
