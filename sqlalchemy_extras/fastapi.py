@@ -14,7 +14,7 @@ from typing import Any, AsyncGenerator, Optional, Union
 from fastapi import Depends, FastAPI, Request
 from sqlalchemy import func
 from sqlalchemy.engine.url import URL
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.exc import DatabaseError, ProgrammingError
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
