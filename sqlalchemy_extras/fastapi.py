@@ -12,6 +12,7 @@ from logging import getLogger
 from typing import Any, AsyncGenerator, Optional, Union
 
 from fastapi import Depends, FastAPI, Request
+import fastapi
 from sqlalchemy import func
 from sqlalchemy.engine.url import URL
 from sqlalchemy.exc import DatabaseError, ProgrammingError
@@ -142,6 +143,7 @@ def session_factory(request: Request) -> async_scoped_session:
 
 
 async def sqlalchemy_session(
+    request: Request,
     factory: async_scoped_session = Depends(session_factory),
 ) -> AsyncGenerator[AsyncSession, None]:
     """Return a sqlalchemy session.
@@ -155,14 +157,24 @@ async def sqlalchemy_session(
         AsyncGenerator[AsyncSession, None]: The async session, wrapped in a generator.
 
     """
-    session = factory()
 
-    try:
-        async with session.begin() as trans:
+    is_transactional = request.method in ("POST", "PUT", "PATCH", "DELETE")
+
+    async with factory() as session:
+        transaction = None
+        try:
+            if is_transactional:
+                transaction = await session.begin()
             yield session
-            await trans.commit()
-    finally:
-        await session.close()
+        except:
+            if transaction is not None:
+                await transaction.rollback()
+            raise
+        else:
+            if transaction is not None:
+                await transaction.commit()
+
+    await session.close()
 
 
 async def sqlalchemy_connection(
