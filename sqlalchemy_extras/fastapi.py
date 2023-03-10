@@ -11,8 +11,8 @@ from asyncio import current_task
 from logging import getLogger
 from typing import Any, AsyncGenerator, Optional, Union
 
-from fastapi import Depends, FastAPI, Request
 import fastapi
+from fastapi import Depends, FastAPI, Request
 from sqlalchemy import func
 from sqlalchemy.engine.url import URL
 from sqlalchemy.exc import DatabaseError, ProgrammingError
