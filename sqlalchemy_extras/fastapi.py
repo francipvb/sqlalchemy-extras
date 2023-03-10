@@ -161,18 +161,11 @@ async def sqlalchemy_session(
     is_transactional = request.method in ("POST", "PUT", "PATCH", "DELETE")
 
     async with factory() as session:
-        transaction = None
-        try:
-            if is_transactional:
-                transaction = await session.begin()
-            yield session
-        except:
-            if transaction is not None:
-                await transaction.rollback()
-            raise
+        if is_transactional:
+            async with session.begin() as transaction:
+                yield session
         else:
-            if transaction is not None:
-                await transaction.commit()
+            yield session
 
     await session.close()
 
