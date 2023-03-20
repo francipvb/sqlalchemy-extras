@@ -145,13 +145,15 @@ async def sqlalchemy_session(
     is_transactional = request.method in ("POST", "PUT", "PATCH", "DELETE")
 
     session = factory()
-    if is_transactional:
-        async with session.begin():
+    try:
+        if is_transactional:
+            async with session.begin():
+                yield session
+        else:
             yield session
-    else:
-        yield session
 
-    await session.close()
+    finally:
+        await session.close()
 
 
 async def sqlalchemy_connection(
