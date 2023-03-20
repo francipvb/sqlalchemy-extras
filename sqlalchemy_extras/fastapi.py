@@ -8,7 +8,7 @@ For details, see help of individual functions.
 """
 import os
 from logging import getLogger
-from typing import Any, AsyncGenerator, Optional, Union
+from typing import Any, AsyncGenerator, Callable, Optional, Union
 
 from fastapi import Depends, FastAPI, Request
 from sqlalchemy.engine.url import URL
@@ -46,7 +46,7 @@ def _get_session_factory(app: FastAPI) -> async_scoped_session:
         raise RuntimeError("Database session factory not provided.")
 
 
-def _set_session_factory(app: FastAPI, factory: sessionmaker[AsyncSession]):
+def _set_session_factory(app: FastAPI, factory: Callable[..., AsyncSession]):
     setattr(app.state, _SESSION_FACTORY_APP_STATE_KEY, factory)
 
 
