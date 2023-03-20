@@ -7,15 +7,11 @@ with SQLAlchemy.
 For details, see help of individual functions.
 """
 import os
-from asyncio import current_task
 from logging import getLogger
 from typing import Any, AsyncGenerator, Optional, Union
 
-import fastapi
 from fastapi import Depends, FastAPI, Request
-from sqlalchemy import func
 from sqlalchemy.engine.url import URL
-from sqlalchemy.exc import DatabaseError, ProgrammingError
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -50,7 +46,7 @@ def _get_session_factory(app: FastAPI) -> async_scoped_session:
         raise RuntimeError("Database session factory not provided.")
 
 
-def _set_session_factory(app: FastAPI, factory: async_scoped_session):
+def _set_session_factory(app: FastAPI, factory: sessionmaker[AsyncSession]):
     setattr(app.state, _SESSION_FACTORY_APP_STATE_KEY, factory)
 
 
@@ -85,27 +81,16 @@ def setup_engine(  # noqa C901
     log.info("Parsing database URL.")
     url = make_async_url(url)
 
-    @app.on_event("startup")
-    async def initialize_sqlalchemy():
-        log.info("Connecting to '%s' using '%s'.", url.database, url.get_backend_name())
-        engine = create_async_engine(url, **kwargs)
-        log.info("Testing connection...")
-        try:
-            async with engine.connect() as conn:
-                scalar = await conn.scalar(func.current_timestamp())
-                log.info("Query result is '%s'.", scalar)
-        except ProgrammingError:  # pragma nocover
-            log.warning("Error trying to run a test query.", exc_info=True)
+    log.info("Connecting to '%s' using '%s'.", url.database, url.get_backend_name())
+    engine = create_async_engine(url, **kwargs)
 
-        session = async_scoped_session(
-            sessionmaker(
-                bind=engine,
-                class_=AsyncSession,  # type: ignore
-            ),
-            current_task,
-        )
-        _set_engine(app, engine)
-        _set_session_factory(app, session)
+    session = sessionmaker(
+        bind=engine,
+        class_=AsyncSession,  # type: ignore
+    )
+
+    _set_engine(app, engine)
+    _set_session_factory(app, session)
 
     @app.on_event("shutdown")
     async def dispose_engine():
@@ -155,17 +140,16 @@ async def sqlalchemy_session(
 
     Returns:
         AsyncGenerator[AsyncSession, None]: The async session, wrapped in a generator.
-
     """
 
     is_transactional = request.method in ("POST", "PUT", "PATCH", "DELETE")
 
-    async with factory() as session:
-        if is_transactional:
-            async with session.begin() as transaction:
-                yield session
-        else:
+    session = factory()
+    if is_transactional:
+        async with session.begin():
             yield session
+    else:
+        yield session
 
     await session.close()
 
