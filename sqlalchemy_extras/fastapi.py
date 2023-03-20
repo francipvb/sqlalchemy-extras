@@ -94,9 +94,6 @@ def setup_engine(  # noqa C901
 
     @app.on_event("shutdown")
     async def dispose_engine():
-        log.info("Closing all database sessions.")
-        await _get_session_factory(app).close()
-
         log.info("Closing engine.")
         await _get_engine(app).dispose()
 
