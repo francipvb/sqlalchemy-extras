@@ -163,7 +163,7 @@ class WithPK(typing.Generic[_TId]):
         typing.Optional[typing.Mapping[str, typing.Any]]
     ] = None
 
-    id: orm.Mapped[_TId]
+    # id: orm.Mapped[_TId]
 
     def __init_subclass__(cls, *args: typing.Any, **kwargs: typing.Any) -> None:
         orig_bases: typing.Tuple[typing.Any, ...] = cls.__orig_bases__  # type: ignore
@@ -186,9 +186,10 @@ class WithPK(typing.Generic[_TId]):
                     primary_key=True,
                     **column_kwargs,
                 )
-                cls.id = attr_value
                 cls.__annotations__["id"] = orm.Mapped[pk_type]
+                cls.id = attr_value
                 break
+
         else:
             raise TypeError(
                 f"Class `{WithPK.__module__}.{WithPK.__qualname__}` not found in the "
