@@ -1,10 +1,12 @@
+# pylint: disable=not-callable
 import typing
 
-import sqlalchemy as sa
-from sqlalchemy.orm.decl_api import declared_attr
-from sqlalchemy.sql.functions import current_timestamp
+from sqlalchemy import TIMESTAMP, Boolean, false, func, Column, orm
+from sqlalchemy.types import TypeEngine
 
 from .utils import pluralize
+
+_TId = typing.TypeVar("_TId")
 
 
 class SoftDeletable:
@@ -43,11 +45,11 @@ class SoftDeletable:
 
     __abstract__ = True
 
-    is_removed = sa.Column(
-        sa.Boolean,
+    is_removed = Column(
+        Boolean,
         index=True,
         nullable=False,
-        server_default=sa.false(),
+        server_default=false(),
         comment="Soft deletion flag.",
     )
 
@@ -80,16 +82,18 @@ class Timestamps:
 
     __abstract__ = True
 
-    created = sa.Column(
-        sa.TIMESTAMP,
-        default=current_timestamp(),
+    created = Column(
+        TIMESTAMP(),
+        server_default=func.current_timestamp(),
         nullable=False,
         comment="When a row were added.",
     )
-    updated = sa.Column(
-        sa.TIMESTAMP,
-        onupdate=current_timestamp(),
+    updated = Column(
+        TIMESTAMP(),
+        onupdate=func.current_timestamp(),
         comment="Last row update date and time.",
+        nullable=True,
+        default=None,
     )
 
     def touch(self):
@@ -110,43 +114,17 @@ class Timestamps:
         <sqlalchemy.sql.functions.current_timestamp at ...>
         >>>
         """
-        self.updated = current_timestamp()
-
-
-class WithPK:
-    """Adds a primary key.
-
-    >>> from sqlalchemy.orm.decl_api import declarative_base
-
-    >>> Base = declarative_base()
-
-    >>> class SubWithPK(WithPK, Base):
-    ...     __tablename__='subwithpk'
-    ...
-    >>> SubWithPK.id.name
-    'id'
-    >>>
-    """
-
-    __abstract__ = True
-
-    type_: typing.ClassVar[sa.types.TypeEngine] = sa.Integer  # type: ignore
-    autoincrement: bool = True
-
-    @declared_attr
-    def id(cls) -> sa.Column:
-        return sa.Column(
-            "id", cls.type_, primary_key=True, autoincrement=cls.autoincrement
-        )
+        self.updated = func.current_timestamp()
 
 
 class Autonamed:
     """Auto-name table.
 
-    >>> from sqlalchemy.orm.decl_api import declarative_base
-    >>> Base = declarative_base()
+    >>> from sqlalchemy.orm import DeclarativeBase
+    >>> class Base(DeclarativeBase):
+    ...     pass
     >>> class Prop(Autonamed, Base):
-    ...     id=sa.Column(sa.Integer, primary_key=True)
+    ...     id: orm.Mapped[int]=orm.mapped_column(primary_key=True)
     ...
     >>> Prop.__table__.name
     'props'
@@ -154,7 +132,68 @@ class Autonamed:
     """
 
     __abstract__ = True
+    __tablename__: typing.ClassVar[str]
 
-    @declared_attr
-    def __tablename__(cls):
-        return pluralize(cls.__name__)
+    def __init_subclass__(cls) -> None:
+        cls.__tablename__ = pluralize(cls.__name__)
+        super().__init_subclass__()
+
+
+class WithPK(typing.Generic[_TId]):
+    """Automatically add a primary key to a subclass.
+
+    Example usage:
+    >>> from sqlalchemy import orm
+    >>> class Base(orm.DeclarativeBase):
+    ...     pass
+    ...
+    >>>
+    >>> class Item(WithPK[int], Base):
+    ...     __tablename__='items'
+    ...
+    >>> Item.id.expression.type
+    Integer()
+    >>>
+    """
+
+    __abstract__ = True
+
+    __pk_type__: typing.ClassVar[typing.Optional[TypeEngine[typing.Any]]] = None
+    __pk_kwargs__: typing.ClassVar[
+        typing.Optional[typing.Mapping[str, typing.Any]]
+    ] = None
+
+    # id: orm.Mapped[_TId]
+
+    def __init_subclass__(cls, *args: typing.Any, **kwargs: typing.Any) -> None:
+        orig_bases: typing.Tuple[typing.Any, ...] = cls.__orig_bases__  # type: ignore
+        entity_name: str = cls.__name__.lower()  # type: ignore
+
+        column_kwargs: typing.Dict[str, typing.Any] = (
+            dict(cls.__pk_kwargs__) if cls.__pk_kwargs__ is not None else dict()
+        )
+        if cls.__pk_type__ is not None:
+            column_kwargs.setdefault("type_", cls.__pk_type__)
+        if "name" not in column_kwargs:
+            column_kwargs.update(
+                name=f"{entity_name}_id",
+            )
+
+        for item in orig_bases:  # type: ignore
+            if typing.get_origin(item) is WithPK:  # type: ignore
+                pk_type = typing.get_args(item)[0]
+                attr_value = orm.mapped_column(
+                    primary_key=True,
+                    **column_kwargs,
+                )
+                cls.__annotations__["id"] = orm.Mapped[pk_type]
+                cls.id = attr_value
+                break
+
+        else:
+            raise TypeError(
+                f"Class `{WithPK.__module__}.{WithPK.__qualname__}` not found in the "
+                f"class `{cls.__module__}.{cls.__qualname__}` inheritance tree."
+            )
+
+        super().__init_subclass__(*args, **kwargs)

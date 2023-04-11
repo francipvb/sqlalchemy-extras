@@ -6,166 +6,193 @@ with SQLAlchemy.
 
 For details, see help of individual functions.
 """
-import os
+from contextlib import asynccontextmanager, contextmanager
+from functools import cached_property
 from logging import getLogger
-from typing import Any, AsyncGenerator, Callable, Optional, Union
+from typing import (
+    Any,
+    AsyncContextManager,
+    AsyncGenerator,
+    ContextManager,
+    Generator,
+    Optional,
+    Union,
+)
 
-from fastapi import Depends, FastAPI, Request
-from sqlalchemy.engine.url import URL
+from fastapi import Request
+from sqlalchemy import URL, Connection, make_url, create_engine, Engine
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
-    AsyncSession,
-    async_scoped_session,
     create_async_engine,
+    async_sessionmaker,
+    AsyncSession,
 )
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, Session
 
 from .utils import make_async_url
 
-_ENGINE_APP_STATE_KEY = "__app_engine__"
-_SESSION_FACTORY_APP_STATE_KEY = "__session_factory__"
 log = getLogger(__name__)
 
 
-def _get_engine(app: FastAPI) -> AsyncEngine:
-    try:
-        return getattr(app.state, _ENGINE_APP_STATE_KEY)
-    except AttributeError:
-        raise RuntimeError("Database not initialized.")
-
-
-def _set_engine(app: FastAPI, engine: AsyncEngine):
-    setattr(app.state, _ENGINE_APP_STATE_KEY, engine)
-
-
-def _get_session_factory(app: FastAPI) -> async_scoped_session:
-    try:
-        return getattr(app.state, _SESSION_FACTORY_APP_STATE_KEY)
-    except AttributeError:
-        raise RuntimeError("Database session factory not provided.")
-
-
-def _set_session_factory(app: FastAPI, factory: Callable[..., AsyncSession]):
-    setattr(app.state, _SESSION_FACTORY_APP_STATE_KEY, factory)
-
-
-def setup_engine(  # noqa C901
-    app: FastAPI,
-    *,
-    url: Optional[Union[str, URL]] = None,
-    **kwargs: Any,
-):
-    """Setup SQLALchemy async engine.
-
-    This function adds startup and shutdown handlers to the supplied FastAPI instance.
-
-    If the URL is not provided, it is taken from the environment variables.
-
-    Provide it as the 'DATABASE_URL' environment variable.
-
-    Args:
-        app (FastAPI): The FastAPI application instance.
-        url (Optional[Union[str, URL]], optional): The database URL to be used.
-
-    Raises:
-        RuntimeError: If the URL is not provided.
-    """
-    if url is None:
-        log.info("Retrieving database URL from environment variable.")
-        try:
-            url = os.environ["DATABASE_URL"]
-        except KeyError:
-            raise RuntimeError("Database URL not provided.")
-
-    log.info("Parsing database URL.")
-    url = make_async_url(url)
-
-    log.info("Connecting to '%s' using '%s'.", url.database, url.get_backend_name())
-    engine = create_async_engine(url, **kwargs)
-
-    session = sessionmaker(
-        bind=engine,
-        class_=AsyncSession,  # type: ignore
-    )
-
-    _set_engine(app, engine)
-    _set_session_factory(app, session)
-
-    @app.on_event("shutdown")
-    async def dispose_engine():
-        log.info("Closing engine.")
-        await _get_engine(app).dispose()
-
-
-def engine(request: Request) -> AsyncEngine:
-    """Return the engine from the current request.
-
-    This is meant to be used as a fastapi dependency.
-
-    Args:
-        request (Request): The current request.
-
-    Returns:
-        AsyncEngine: The async engine.
-    """
-    return _get_engine(request.app)
-
-
-def session_factory(request: Request) -> async_scoped_session:
-    """Return a session factory for the request.
-
-    Args:
-        request (Request): The current request.
-
-    Returns:
-        async_scoped_session: A session factory.
-    """
-    return _get_session_factory(request.app)
-
-
-async def sqlalchemy_session(
-    request: Request,
-    factory: async_scoped_session = Depends(session_factory),
-) -> AsyncGenerator[AsyncSession, None]:
-    """Return a sqlalchemy session.
-
-    This is meant to be used as a fastapi dependency.
-
-    Args:
-        factory: The session factory.
-
-    Returns:
-        AsyncGenerator[AsyncSession, None]: The async session, wrapped in a generator.
-    """
-
-    is_transactional = request.method in ("POST", "PUT", "PATCH", "DELETE")
-
-    session = factory()
-    try:
-        if is_transactional:
-            async with session.begin():
-                yield session
+class _WithURL:
+    def __init__(self, url: Union[str, URL]) -> None:
+        if not isinstance(url, URL):
+            self._url = make_url(url)
         else:
+            self._url = url
+
+    @property
+    def url(self) -> URL:
+        return self._url
+
+
+class EngineFactory(_WithURL):
+    def __init__(self, url: Union[str, URL]) -> None:
+        super().__init__(url)
+
+        log.info("Initialicing engine.")
+        engine = create_engine(self.url, pool_pre_ping=True)
+        log.info("Engine initialized successfully.")
+        self._engine = engine
+
+    @property
+    def engine(self) -> Engine:
+        return self._engine
+
+    @cached_property
+    def sessionmaker(self) -> sessionmaker[Session]:
+        log.debug("Initialicing a session factory.")
+        factory = sessionmaker(self.engine)
+        log.debug("Session factory initialized.")
+        return factory
+
+    @contextmanager
+    def session(self, *, in_transaction: bool = False) -> Generator[Session, Any, None]:
+        session_contextmanager = None
+        if in_transaction:
+            log.debug("Starting a transactional session.")
+            session_contextmanager = self.sessionmaker.begin()
+        else:
+            log.debug("Starting a non-transactional session.")
+            session_contextmanager = self.sessionmaker()
+        try:
+            log.debug("Connecting to the database.")
+            with session_contextmanager as session:
+                yield session
+                if session.in_transaction():
+                    log.debug(
+                        "Changes to the session will be committed as the session is in "
+                        "a transaction."
+                    )
+        finally:
+            log.debug("Session terminated.")
+
+    @contextmanager
+    def connection(
+        self, *, in_transaction: bool = False
+    ) -> Generator[Connection, Any, None]:
+        connection_contextmanager: Optional[ContextManager[Connection]] = None
+        if in_transaction:
+            log.debug("Starting a transactional database connection.")
+            connection_contextmanager = self.engine.begin()
+        else:
+            log.debug("Starting a non-transactional database connection.")
+            connection_contextmanager = self.engine.connect()
+
+        try:
+            log.debug("Connectiong to the database.")
+            with connection_contextmanager as connection:
+                yield connection
+                if connection.in_transaction():
+                    log.debug("Commmitting transaction.")
+        finally:
+            log.debug("Connection has been closed.")
+
+    def get_session(self, request: Request):
+        with self.session(
+            in_transaction=request.method.lower() in ("post", "put", "patch", "delete")
+        ) as session:
             yield session
 
-    finally:
-        await session.close()
+    def get_connection(self, request: Request):
+        with self.connection(
+            in_transaction=request.method.lower() in ("post", "put", "patch", "delete")
+        ) as connection:
+            yield connection
 
 
-async def sqlalchemy_connection(
-    engine: AsyncEngine = Depends(engine),
-) -> AsyncGenerator[AsyncConnection, None]:
-    """Return a sqlalchemy async connection.
+class AsyncEngineFactory(_WithURL):
+    def __init__(self, url: Union[str, URL]) -> None:
+        changed_url = make_async_url(url)
+        super().__init__(changed_url)
 
-    This is meant to be used as a fastapi dependency.
+        log.info("Setting up an async engine instance.")
+        engine = create_async_engine(self.url, pool_pre_ping=True)
+        log.info("Async engine connection established.")
+        self._engine = engine
 
-    Args:
-        engine (AsyncEngine, optional): The engine to create the session for.
+    @property
+    def engine(self) -> AsyncEngine:
+        return self._engine
 
-    Returns:
-        AsyncGenerator[AsyncConnection, None]: The connecttttttion.
+    @cached_property
+    def sessionmaker(self) -> async_sessionmaker[AsyncSession]:
+        log.debug("Initialicing an async session factory.")
+        factory = async_sessionmaker(self.engine)
+        log.debug("Session factory initialized.")
+        return factory
 
-    """
-    async with engine.connect() as conn:
-        yield conn
+    def get_engine(self) -> AsyncEngine:
+        return self.engine
+
+    @asynccontextmanager
+    async def session(
+        self, *, in_transaction: bool = False
+    ) -> AsyncGenerator[AsyncSession, None]:
+        session_contextmanager: Optional[AsyncContextManager[AsyncSession]] = None
+        if in_transaction:
+            log.debug("Starting a transactional async session.")
+            session_contextmanager = self.sessionmaker.begin()
+        else:
+            log.debug("Starting an async session.")
+            session_contextmanager = self.sessionmaker()
+        try:
+            log.debug("Starting async session.")
+            async with session_contextmanager as session:
+                log.debug("Connected to the database with an async session.")
+                yield session
+                if session.in_transaction():
+                    log.debug(
+                        "Changes to the session will be committed because the session "
+                        "is in a transaction."
+                    )
+        finally:
+            log.debug("Async session terminated.")
+
+    @asynccontextmanager
+    async def connection(
+        self, *, in_transaction: bool = False
+    ) -> AsyncGenerator[AsyncConnection, None]:
+        connection_contextmanager: Optional[AsyncContextManager[AsyncConnection]] = None
+        if in_transaction:
+            connection_contextmanager = self.engine.begin()
+        else:
+            connection_contextmanager = self.engine.connect()
+        try:
+            async with connection_contextmanager as connection:
+                yield connection
+        finally:
+            pass
+
+    async def get_session(self, request: Request):
+        async with self.session(
+            in_transaction=request.method.lower() in ("post", "put", "patch", "delete")
+        ) as session:
+            yield session
+
+    async def get_connection(self, request: Request):
+        async with self.connection(
+            in_transaction=request.method.lower() in ("post", "put", "patch", "delete")
+        ) as connection:
+            yield connection
