@@ -45,10 +45,8 @@ class SoftDeletable:
 
     __abstract__ = True
 
-    is_removed = Column(
-        Boolean,
+    is_removed: orm.Mapped[bool] = orm.mapped_column(
         index=True,
-        nullable=False,
         server_default=false(),
         comment="Soft deletion flag.",
     )
