@@ -1,7 +1,8 @@
 # pylint: disable=not-callable
+from datetime import datetime
 import typing
 
-from sqlalchemy import TIMESTAMP, Boolean, false, func, Column, orm
+from sqlalchemy import TIMESTAMP, false, func, orm
 from sqlalchemy.types import TypeEngine
 
 from .utils import pluralize
@@ -45,10 +46,8 @@ class SoftDeletable:
 
     __abstract__ = True
 
-    is_removed = Column(
-        Boolean,
+    is_removed: orm.Mapped[bool] = orm.mapped_column(
         index=True,
-        nullable=False,
         server_default=false(),
         comment="Soft deletion flag.",
     )
@@ -82,17 +81,15 @@ class Timestamps:
 
     __abstract__ = True
 
-    created = Column(
-        TIMESTAMP(),
+    created: orm.Mapped[datetime] = orm.mapped_column(
+        type_=TIMESTAMP(),
         server_default=func.current_timestamp(),
-        nullable=False,
         comment="When a row were added.",
     )
-    updated = Column(
-        TIMESTAMP(),
+    updated: orm.Mapped[datetime | None] = orm.mapped_column(
+        type_=TIMESTAMP(),
         onupdate=func.current_timestamp(),
         comment="Last row update date and time.",
-        nullable=True,
         default=None,
     )
 
@@ -114,7 +111,7 @@ class Timestamps:
         <sqlalchemy.sql.functions.current_timestamp at ...>
         >>>
         """
-        self.updated = func.current_timestamp()
+        self.updated = func.current_timestamp()  # type: ignore
 
 
 class Autonamed:
@@ -163,7 +160,7 @@ class WithPK(typing.Generic[_TId]):
         typing.Optional[typing.Mapping[str, typing.Any]]
     ] = None
 
-    # id: orm.Mapped[_TId]
+    id: orm.Mapped[_TId]
 
     def __init_subclass__(cls, *args: typing.Any, **kwargs: typing.Any) -> None:
         orig_bases: typing.Tuple[typing.Any, ...] = cls.__orig_bases__  # type: ignore
