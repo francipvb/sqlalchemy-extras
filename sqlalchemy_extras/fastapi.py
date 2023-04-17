@@ -69,24 +69,14 @@ class EngineFactory(_WithURL):
 
     @contextmanager
     def session(self, *, in_transaction: bool = False) -> Generator[Session, Any, None]:
-        session_contextmanager = None
         if in_transaction:
             log.debug("Starting a transactional session.")
-            session_contextmanager = self.sessionmaker.begin()
+            with self.sessionmaker.begin() as session:
+                yield session
         else:
             log.debug("Starting a non-transactional session.")
-            session_contextmanager = self.sessionmaker()
-        try:
-            log.debug("Connecting to the database.")
-            with session_contextmanager as session:
+            with self.sessionmaker() as session:
                 yield session
-                if session.in_transaction():
-                    log.debug(
-                        "Changes to the session will be committed as the session is in "
-                        "a transaction."
-                    )
-        finally:
-            log.debug("Session terminated.")
 
     @contextmanager
     def connection(
