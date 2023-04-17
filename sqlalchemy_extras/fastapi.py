@@ -150,25 +150,18 @@ class AsyncEngineFactory(_WithURL):
     async def session(
         self, *, in_transaction: bool = False
     ) -> AsyncGenerator[AsyncSession, None]:
-        session_contextmanager: Optional[AsyncContextManager[AsyncSession]] = None
         if in_transaction:
             log.debug("Starting a transactional async session.")
-            session_contextmanager = self.sessionmaker.begin()
+            async with self.sessionmaker.begin() as session:
+                log.debug("Started transaction.")
+                yield session
+                log.debug("Transaction was successful and changes will be committed.")
+
         else:
             log.debug("Starting an async session.")
-            session_contextmanager = self.sessionmaker()
-        try:
-            log.debug("Starting async session.")
-            async with session_contextmanager as session:
-                log.debug("Connected to the database with an async session.")
+            async with self.sessionmaker() as session:
+                log.debug("Non-transactional session started.")
                 yield session
-                if session.in_transaction():
-                    log.debug(
-                        "Changes to the session will be committed because the session "
-                        "is in a transaction."
-                    )
-        finally:
-            log.debug("Async session terminated.")
 
     @asynccontextmanager
     async def connection(
