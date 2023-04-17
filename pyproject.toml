@@ -3,7 +3,7 @@ authors = ["Francisco Del Roio <francipvb@hotmail.com>"]
 description = ""
 name = "sqlalchemy-extras"
 readme = "README.md"
-version = "2.0.0"
+version = "2.0.2"
 
 [tool.poetry.dependencies]
 sqlalchemy = "^2.0.9"
